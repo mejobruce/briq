@@ -1,96 +1,126 @@
 package com.org;
 
-import java.io.FileWriter;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.sql.Date;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
-
-import org.json.simple.JSONArray;
-import org.json.simple.JSONObject;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.Test;
 
 import io.restassured.RestAssured;
-import io.restassured.path.json.JsonPath;
 import io.restassured.response.Response;
 import lib.org.LibGlobal;
 
 //C. API
 public class FetchData extends LibGlobal {
-	
+
 	@Test
 	public void test1() throws java.text.ParseException {
-		
+
 		logManager("FetchData");
-		log.info(" Send a GET request to the API URL");
-		// Step 1: Send a GET request to the API URL
-        Response response = RestAssured.get("https://data.sfgov.org/resource/p4e4-a5a7.json");
 
-        if (response.getStatusCode() == 200) {
-        	log.info("Parse the JSON response");
-            // Step 2: Parse the JSON response
-            JsonPath jsonPath = response.jsonPath();
-            List<JSONObject> data = jsonPath.getList("$");
+		// Specify the API endpoint URL
+		String apiUrl = "https://data.sfgov.org/resource/p4e4-a5a7.json";
 
-            
-            Calendar c = Calendar.getInstance();
-            log.info("Format the timestamp fields as dates (mm-dd-yyyy)");
-            // Step 3: Format the timestamp fields as dates (mm-dd-yyyy)
-            SimpleDateFormat inputDateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS");
-                     
-            SimpleDateFormat outputDateFormat = new SimpleDateFormat("MM-dd-yyyy");
+		// Send an HTTP GET request using RestAssured
+		Response response = RestAssured.get(apiUrl);
+		if (response.getStatusCode() == 200) {
+			// Retrieve the JSON response
+			List<String> jsonResponse = response.jsonPath().getList("$");
+			System.out.println(jsonResponse);
+			// Generate a timestamp for filenames
+			Calendar c = Calendar.getInstance();
+			String timeStamp = new SimpleDateFormat("MM-dd-yy-HH-mm-ss").format(c.getTime());
+			System.out.println(timeStamp);
+			String path = getProperty() + "\\briq";
+			// Create a JSON file
+			String jsonFileName = "sfgov_" + timeStamp + ".json";
+			File file = new File(path, jsonFileName);
+			try {
+				// Create the csv file
+				boolean fileCreated = file.createNewFile();
 
-            for (JSONObject item : data) {
-                String timestamp = item.get("timestamp").toString();
-                String date = inputDateFormat.format(c.getTime());
-				item.put("timestamp", outputDateFormat.format(c.getTime()));
-				
-			log.info("Step 4: Add the is_roof field");
+				if (fileCreated) {
+					System.out.println("File created successfully at: " + file.getAbsolutePath());
+				} else {
+					System.out.println("File already exists at: " + file.getAbsolutePath());
+				}
+			} catch (IOException e) {
+				System.err.println("An error occurred while creating the file: " + e.getMessage());
+			}
+			try {
+				FileOutputStream jsonFile = new FileOutputStream(file);
+				jsonFile.write(response.getBody().asByteArray());
+				jsonFile.close();
+				System.out.println("JSON file created: " + file);
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			String asString = response.getBody().asString();
+			System.out.println(asString);
+			JSONArray jsonArray = new JSONArray(asString);
+			// Create an Excel workbook
+			String excelFileName = "sfgov_" + timeStamp + ".CSV";
 
-                // Step 4: Add the "is_roof" field
-                String description = item.get("description").toString();
-                item.put("is_roof", description.toLowerCase().contains("roof"));
-            }
+			File loc = new File(path, excelFileName);
+			try {
+				// Create the text file
+				boolean fileCreated = loc.createNewFile();
 
-            
-            log.info("Export data as a JSON file");
-            // Step 5: Export data as a JSON file
-            SimpleDateFormat timestampFormat = new SimpleDateFormat("MM-dd-yy-HH-mm-ss");
-            String timestamp = timestampFormat.format(c.getTime());
-            String jsonFileName = "/HOME/briq/sfgov_" + timestamp + ".json";
+				if (fileCreated) {
+					System.out.println("File created successfully at: " + loc.getAbsolutePath());
+				} else {
+					System.out.println("File already exists at: " + loc.getAbsolutePath());
+				}
+			} catch (IOException e) {
+				System.err.println("An error occurred while creating the file: " + e.getMessage());
+			}
 
-            try (FileWriter fileWriter = new FileWriter(jsonFileName)) {
-                JSONArray jsonArray = new JSONArray();
-                jsonArray.addAll(data);
-                fileWriter.write(jsonArray.toJSONString());
-                System.out.println("JSON file created successfully: " + jsonFileName);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+			Workbook workbook = new XSSFWorkbook();
+			Sheet sheet = workbook.createSheet("SFGov Data");
+			int rowNum = 0;
+			Row headerRow = sheet.createRow(rowNum++);
+			headerRow.createCell(0).setCellValue("description");
+			headerRow.createCell(1).setCellValue("timestamp");
+			headerRow.createCell(2).setCellValue("is_roof");
+			// Add more headers here
+			for (int i = 0; i < jsonArray.length(); i++) {
+				JSONObject jsonObject = jsonArray.getJSONObject(i);
+				Row row = sheet.createRow(i + 1);
+				// Format timestamp as a date (bonus)
+				Cell timestampCell = row.createCell(1);
+				timestampCell.setCellValue(c.getTime());
+				CellStyle dateStyle = workbook.createCellStyle();
+				dateStyle.setDataFormat(workbook.getCreationHelper().createDataFormat().getFormat("MM-dd-yyyy"));
+				timestampCell.setCellStyle(dateStyle);
+				row.createCell(0).setCellValue(jsonObject.getString("description"));
+				row.createCell(2).setCellValue(jsonObject.getString("description").contains("roof") ? "Yes" : "No");
+			}
+			// Save the Excel workbook to a file (bonus)
+			try {
+				FileOutputStream excelFile = new FileOutputStream(loc);
+				workbook.write(excelFile);
+				excelFile.close();
+				System.out.println("Excel file created: " + loc);
+			} catch (FileNotFoundException e) {
+				e.printStackTrace();
+			} catch (IOException e) {
+				// TODO: handle exception
+				e.printStackTrace();
+			}
+		} else {
+			System.err.println("HTTP GET request failed with response code: " + response.getStatusCode());
+		}
 
-              log.info("Export data as a CSV file");
-            // BONUS - Step 6: Export data as a CSV file
-            String csvFileName = "/HOME/briq/sfgov_" + timestamp + ".csv";
-            try (FileWriter csvFileWriter = new FileWriter(csvFileName)) {
-                csvFileWriter.append("timestamp,description,is_roof\n");
-                for (JSONObject item : data) {
-                    String csvRow = item.get("timestamp") + "," +
-                            "\"" + item.get("description") + "\"," +
-                            item.get("is_roof");
-                    csvFileWriter.append(csvRow + "\n");
-                }
-                System.out.println("CSV file created successfully: " + csvFileName);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        } else {
-            System.out.println("Failed to fetch data. Status code: " + response.getStatusCode());
-        }
 	}
-
 }
